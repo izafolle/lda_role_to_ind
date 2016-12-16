@@ -2,18 +2,10 @@ import csv
 import collections
 import pickle
 import os 
-import math
-import scipy.stats
-import time
 from sklearn.decomposition import LatentDirichletAllocation
-from scipy import spatial 
 import pycurl
 from io import BytesIO as BytesIO
-from pprint import pprint
-from json import loads as jloads
-import certifi
-import xmltodict
-import encodings
+#import xmltodict
 import itertools
 from numpy import array
 import numpy
@@ -21,7 +13,8 @@ import re
 import sys
 
 def pickle_load(path):
-    """Loads a pickled data file if the file is there, returns False otherwise"""
+    """Loads a pickled data file if the file is there, returns False otherwise.
+    :param path: the path and filename to a file"""
     if os.path.isfile(path):
         file = pickle.load(open(path, "rb"))
         return file
@@ -29,7 +22,11 @@ def pickle_load(path):
         return False
 
 def processdata(path = os.getcwd(), mode = 'train'):
-    """In training mode loads information from a file to enable building a model, in testing mode loads the presumably gathered model."""
+    """In training mode loads information from a file to enable building a model,
+    in testing mode loads the presumably gathered model.
+    :param path: the path to the location of the data to be processed.
+    :param mode: the mode to use. train takes a long time as it needs to train the model.  Test assumes the model already exists.
+    """
     # ind_vector: raw counts of ngrams occurring in each industry.
     # example: ('consultant', 'consultant'): 112, ('business', 'analyst'): 106, ('operations', 'manager'): 98, ('network', 'network'): 97, ('director', 'of'): 93, ('account', 'director'): 86, ('co', 'ordinator'): 82, ('product', 'product'): 79, ('it', 'it'): 77, ('programme', 'manager'): 77
     ind_vectors = pickle_load('ind_vectors.data')
@@ -45,15 +42,27 @@ def processdata(path = os.getcwd(), mode = 'train'):
     return ind_vectors, i_features
 
 def featurize(vector,features):
-    """Gather the features from a vector. Essentially transposing the original vector from n-grams as features to industies as features for each n-gram."""
+    """Gather the features from a vector. Essentially transposing the original vector
+    from n-grams as features to industies as features for each n-gram.
+    A list of all possible ngrams is made and then the count of these ngrams in each each industry is recorded.
+    :param vector:  ngram counts per industry
+    :param features: list of all possible ngrams
+    """
+    # TODO only really need the vector to be input as all possible ngrams should be in those.  But as they are already calculated they are fed in.
     dictionary = collections.defaultdict(lambda:0)
     for feature in iter(set(features)):
         dictionary[feature] = [vector[key][feature] if feature in vector[key] else 0 for key in vector] #populates vectors with zeroes where there's no value in an industry for an n-gram.
     return dictionary
 
 def countize(word, ind, count_words, features):
-    """Counts trigrams, bigrams and unigrams for words. This funcion appends them straigt to the data stuctures they will be used in.
-    This populates features and raw conunts for each industry."""
+    """Counts trigrams, bigrams and unigrams for words.
+    This function appends them straight to the data structures they will be used in.
+    This populates features and raw counts for each industry.
+    :param word:  A string containing eg the name of a role or company, etc.
+    :param ind: A the name of an industry
+    :param count_words: dictionary of terms already seen by industry
+    :param features: list of all possible ngrams (being built up in this function)
+    """
     word = clean(word)
     word = word.split()
     if len(word)>1:
@@ -70,11 +79,35 @@ def countize(word, ind, count_words, features):
             unigram = word[i]
             count_words[ind].append((unigram))
             features.append((unigram))
+    print(count_words)
+    print(features)
     return count_words, features
 
 def count_collapse(count_words):
-    """Collapse industries from data into stepweb industies."""
-    collapse = {'Accountancy':['Accounting', 'Accountancy'],'Administration':['Government Administration','Secretarial & Admin.', 'Secretarial & Administration','Secretarial, PAs, Administration', 'Secretarial & Administrative'],'Advertising':[], 'Animal Care':['Veterinary'],'Arts and Entertainment':['Music', 'Computer Games', 'Fine Art', 'Arts and Crafts', 'Photography', 'Motion Pictures and Film', 'Performing Arts', 'Entertainment', 'Events Services'],'Banking':['Banking', 'Investment Banking', 'Venture Capital & Private Equity'],'Catering':['Food & Beverages', 'Food Production', 'Hospitality', 'Restaurants', 'Hotel & Catering', 'Travel, Catering & Hospitality', 'Wine and Spirits', 'Catering & Hospitality', 'Hospitality & Leisure'],'Cleaning':[], 'Construction':['Construction'],'Consulting':['Management Consulting', 'Consultancy'],'Customer Service':['Customer Service', 'Customer Services'],'Design':['Design', 'Graphic Design', 'Fashion & Design'],'Education':['Higher Education', 'Primary/Secondary Education', 'Education', 'Libraries', 'E-Learning', 'Professional Training & Coaching', 'Training'],'Engineering':['Aerospace','Engineering', 'Rail Engineers', 'Computer Hardware', 'Electronics', 'Mechanical or Industrial Engineering', 'Civil Engineering', 'Semiconductors', 'Architecture & Planning'],'Farming and Agriculture':['Farming', 'Ranching', 'Agriculture, Fishing, Forestry'],'Finance':['Banking & Finance', 'Financial Services'],'Health':['Medical Practice', 'Mental Health Care', 'Hospital & Health Care', 'Alternative Medicine', 'Health', 'Medical Devices', 'Health, Nursing', 'Health/Healthcare/Social care'],'Human Resources':['Human Resources', 'Recruitment', 'Staffing and Recruiting'],'Insurance':['Insurance', 'Insurance & Financial Services'],'IT':['Program Development','IT & Internet', 'Computer Software', 'Information Tech.', 'Computer & Network Security', 'Information Technology and Services', 'Internet', 'Wireless', 'Information Technology', 'Information Services', 'Computer Networking', 'Finance IT'],'Legal':['Law Practice', 'Legal', 'Legal Services', 'Judiciary', 'Alternative Dispute Resolution', 'Legislative Office'],'Logistics':['Transport, Logistics','Logistics','Import and Export','Distribution', 'Warehousing', 'Logistics & Transport', 'Package/Freight Delivery', 'Logistics and Supply Chain', 'Transportation/Trucking/Railroad'],'Manufacturing':['Manufacturing', 'Electrical/Electronic Manufacturing', 'Production & Ops.', 'Production & Operations', 'Railroad Manufacture', 'Automotive'],'Management':['Management & Exec.', 'Management & Executive', 'Education Management'], 'Marketing':['Marketing and Advertising', 'Marketing', 'Finance Marketing', 'Client Side', 'Market Research'],'Media':['Media', 'Broadcast Media', 'Media, New Media, Creative', 'Online Media', 'Media Production', 'Writing and Editing', 'Newspapers', 'Animation', 'Publishing'],'Military':['Defence', 'Military', 'Defense & Space', 'Maritime'],'Policing':['Public Policy', 'Think Tanks', 'Political Organization', 'Government Relations', 'International Affairs'],'PR':['Public Relations and Communications'],'Property':['Property','Real Estate', 'Commercial Real Estate'],'Public Sector':['Public Sector'],'Retail':['Wholesale', 'Retail', 'Supermarkets', 'Retail, Wholesale'],'Sales':['Sales'],'Science':['Scientific', 'Nanotechnology', 'Research', 'Biotechnology', 'Chemicals', 'Pharmaceutical & Biotechnology', 'Pharmaceuticals', 'Science'],'Security':['Security', 'Security and Investigations'],'Skilled Trades':['Skilled Trades', 'Dairy', 'Shipbuilding', 'Fishery'],'Social Care':['Individual & Family Services', 'Social Services'],'Sport and Fitness':['Health, Wellness and Fitness', 'Sports', 'Recreational Facilities and Services'],'Third Sector':['Not For Profit, Charities','Philanthropy', 'Charity & Voluntary Work', 'Fund-Raising', 'Charity & Voluntary Work', 'Nonprofit Organization Management', 'Religious Institutions'],'Travel':['Leisure, Travel & Tourism', 'Travel & Hospitality', 'Travel, Leisure, Tourism']}    
+    """Collapse industries from data into stepweb industries.
+    :param count_words: dictionary of terms already seen by industry"""
+    collapse = {'Accountancy':['Accounting', 'Accountancy'],
+                'Administration':['Government Administration','Secretarial & Admin.', 'Secretarial & Administration','Secretarial, PAs, Administration', 'Secretarial & Administrative'],
+                'Advertising':[],
+                'Animal Care':['Veterinary'],
+                'Arts and Entertainment':['Music', 'Computer Games', 'Fine Art', 'Arts and Crafts', 'Photography', 'Motion Pictures and Film', 'Performing Arts', 'Entertainment', 'Events Services'],
+                'Banking':['Banking', 'Investment Banking', 'Venture Capital & Private Equity'],
+                'Catering':['Food & Beverages', 'Food Production', 'Hospitality', 'Restaurants', 'Hotel & Catering', 'Travel, Catering & Hospitality', 'Wine and Spirits', 'Catering & Hospitality', 'Hospitality & Leisure'],
+                'Cleaning':[],
+                'Construction':['Construction'],
+                'Consulting':['Management Consulting', 'Consultancy'],
+                'Customer Service':['Customer Service', 'Customer Services'],
+                'Design':['Design', 'Graphic Design', 'Fashion & Design'],
+                'Education':['Higher Education', 'Primary/Secondary Education', 'Education', 'Libraries', 'E-Learning', 'Professional Training & Coaching', 'Training'],
+                'Engineering':['Aerospace','Engineering', 'Rail Engineers', 'Computer Hardware', 'Electronics', 'Mechanical or Industrial Engineering', 'Civil Engineering', 'Semiconductors', 'Architecture & Planning'],
+                'Farming and Agriculture':['Farming', 'Ranching', 'Agriculture, Fishing, Forestry'],
+                'Finance':['Banking & Finance', 'Financial Services'],
+                'Health':['Medical Practice', 'Mental Health Care', 'Hospital & Health Care', 'Alternative Medicine', 'Health', 'Medical Devices', 'Health, Nursing', 'Health/Healthcare/Social care'],
+                'Human Resources':['Human Resources', 'Recruitment', 'Staffing and Recruiting'],
+                'Insurance':['Insurance', 'Insurance & Financial Services'],
+                'IT':['Program Development','IT & Internet', 'Computer Software', 'Information Tech.', 'Computer & Network Security', 'Information Technology and Services', 'Internet', 'Wireless', 'Information Technology', 'Information Services', 'Computer Networking', 'Finance IT'],
+                'Legal':['Law Practice', 'Legal', 'Legal Services', 'Judiciary', 'Alternative Dispute Resolution', 'Legislative Office'],
+                'Logistics':['Transport, Logistics','Logistics','Import and Export','Distribution', 'Warehousing', 'Logistics & Transport', 'Package/Freight Delivery', 'Logistics and Supply Chain', 'Transportation/Trucking/Railroad'],'Manufacturing':['Manufacturing', 'Electrical/Electronic Manufacturing', 'Production & Ops.', 'Production & Operations', 'Railroad Manufacture', 'Automotive'],'Management':['Management & Exec.', 'Management & Executive', 'Education Management'], 'Marketing':['Marketing and Advertising', 'Marketing', 'Finance Marketing', 'Client Side', 'Market Research'],'Media':['Media', 'Broadcast Media', 'Media, New Media, Creative', 'Online Media', 'Media Production', 'Writing and Editing', 'Newspapers', 'Animation', 'Publishing'],'Military':['Defence', 'Military', 'Defense & Space', 'Maritime'],'Policing':['Public Policy', 'Think Tanks', 'Political Organization', 'Government Relations', 'International Affairs'],'PR':['Public Relations and Communications'],'Property':['Property','Real Estate', 'Commercial Real Estate'],'Public Sector':['Public Sector'],'Retail':['Wholesale', 'Retail', 'Supermarkets', 'Retail, Wholesale'],'Sales':['Sales'],'Science':['Scientific', 'Nanotechnology', 'Research', 'Biotechnology', 'Chemicals', 'Pharmaceutical & Biotechnology', 'Pharmaceuticals', 'Science'],'Security':['Security', 'Security and Investigations'],'Skilled Trades':['Skilled Trades', 'Dairy', 'Shipbuilding', 'Fishery'],'Social Care':['Individual & Family Services', 'Social Services'],'Sport and Fitness':['Health, Wellness and Fitness', 'Sports', 'Recreational Facilities and Services'],'Third Sector':['Not For Profit, Charities','Philanthropy', 'Charity & Voluntary Work', 'Fund-Raising', 'Charity & Voluntary Work', 'Nonprofit Organization Management', 'Religious Institutions'],'Travel':['Leisure, Travel & Tourism', 'Travel & Hospitality', 'Travel, Leisure, Tourism']}
     new_cw = collections.defaultdict(collections.Counter)
     upd_cw = collections.defaultdict(collections.Counter)
     for key in count_words: #transforms a list of ngrams from the data into a count of those same ngrams per industry.
@@ -87,13 +120,18 @@ def count_collapse(count_words):
     return upd_cw
 
 def gather_and_save_vectors(path, words_vec = collections.defaultdict(list), features = []):
-    """Gathers and pickles vectors from a given csv file."""
+    """Gathers and pickles vectors from a given csv file.
+    :param path: path and filename to pickle into.
+    :param words_vec: vector to be pickled.
+    :param features:
+    """
     with open(path, 'rt', encoding='mac_roman') as csvfile:
         csvreader = csv.reader(csvfile, delimiter=' ', quotechar='"')
         for row in csvreader:
-            words_vec, features = countize(row[3], row[2], words_vec, features)
+            words_vec, features = countize(row[3], row[2], words_vec, features) # contains the role and the industry
+
             try:
-                words_vec, features = countize(row[6], row[2], words_vec, features)
+                words_vec, features = countize(row[6], row[2], words_vec, features) # contains the company name and the industry but not always present
             except:
                 pass
     pickle.dump(words_vec, open("ind_vectors.data", "wb"))
@@ -127,17 +165,23 @@ def gather_and_save_vectors(path, words_vec = collections.defaultdict(list), fea
 #     return tfidf_values
 
 
-def declutter(vector):
-    """Removes features with raw count values that are less than two in a vector"""
+def declutter(vector, lower_limit = 2):
+    """Removes features with raw count values that are less than lower_limit in a vector.
+    Infrequent terms in a vector are most likely to be noise.
+    :param vector: A vector (industry, ngram, count) to be decluttered.
+    :param lower_limit: terms with count below lower_limit are decluttered.
+    """
     for key in vector:
-        clutter_values = [value for value in vector[key] if vector[key][value]<2] # gather everything with a value less than two and save it in a list
+        clutter_values = [value for value in vector[key] if vector[key][value]<lower_limit] # gather everything with a value less than two and save it in a list
         for feature in clutter_values: # remove everything in the clutter values from a dictionary
             vector[key].pop(feature,None)
     return vector
 
 def n_grammize(role):
-    """Returns n-grams of a given role. Role can be a string or a tuple of strings. (In this latter case they already are assumed to be stripped of unnecessary
-    punctuation, certain non-alphanumeric charatcters and capitalisation)."""
+    """Returns n-grams of a given role. Role can be a string or a tuple of strings.
+    (In this latter case they already are assumed to be stripped of unnecessary
+    punctuation, certain non-alphanumeric characters and capitalisation).
+    :param role: role name to be processed."""
     ngrams = []
     if isinstance(role,str):
         role = role.lower()
@@ -154,33 +198,172 @@ def n_grammize(role):
 
 
 def feature_vector(features, vector):
-    """Uses featurize function on a vector."""
-    clean_features = set(features)
+    """Uses featurize function on a vector.
+    :param features: list of all possible ngrams
+    :param vector:  ngram counts per industry
+    """
+    clean_features = set(features) # dedupe the features
     new_features_vector = featurize(vector,clean_features)
     return new_features_vector
 
 def clean(word):
-    """Removes stopwords and some non-alpahnumeric characters that are deemed irrelevant for our purposes."""
+    """Removes stopwords and some non-alphanumeric characters that are deemed irrelevant for our purposes.
+    :param word:  text to be cleaned
+    """
     word = word.lower()
     stopwords = ['of', 'and','to', 'at', 'in', '@']
+    # TODO list of stopwords should be input from config
     word = re.sub(r'[\&/\-\(\)\|\@,\]\[]+', ' ', word)
     for stopword in stopwords:
         pattern = r'\b' + stopword + r'\b'
         pattern = re.compile(pattern)
         word = re.sub(pattern, '', word)
     word = re.sub(r'\s\s+', ' ', word)
+    # TODO do we need to remove leading trailing spaces here?
     return word
 
 def construct_legend(indtf_vector, features_vector, lda, labels):
-    keys = [key for key in indtf_vector]
-    most_imp = [(key,[x[0] for x in sorted(list(indtf_vector[key].items()),key=lambda x:x[1], reverse=True)[:10]]) for key in keys]
-    legend = [(guess_topic(lda, tpl[1], features_vector,verbose=False),tpl[0]) for tpl in most_imp]  
-    unique_features = coherence_check(500,transformed,labels)
-    #legend = dict(legend)
-    return legend
+    """Gives the interpretation for each topic.
+    That is uses index of the topic (a number) to map to a business name for a topic.
+    This mapping can be made from a list of unique topic_name to unique_words mapping.
+    :param indtf_vector: industry term frequency vector
+    :param features_vector: mapping of topic_name to unique words
+    :param lda: The model to be labelled.
+    :param labels: list of ngrams.
+    """
+    # keys = [key for key in indtf_vector]
+    # most_imp = [(key,[x[0] for x in sorted(list(indtf_vector[key].items()),key=lambda x:x[1], reverse=True)[:10]]) for key in keys]
+    # legend = [(guess_topic(lda, tpl[1], features_vector,verbose=False),tpl[0]) for tpl in most_imp]
+    # unique_features = coherence_check(500,transformed,labels)
+    # #legend = dict(legend)
+    # return legend
+    def construct_legend(legend={}):
+        c_legend = {
+            'Sport': ['fc', 'rugby', 'holistic', 'cricket', ('massage', 'therapist'), ('virgin', 'active'), 'strength',
+                      ('head', 'coach'), ('strength', 'conditioning')],
+            'Banking': [('barclays', 'capital'), ('barclays', 'corporate'), ('santander', 'uk'), ('banco', 'santander'),
+                        ('barclays', 'investment')],
+            'Travel': ['tui', ('travel', 'consultant'), ('travel', 'plc'), ('tui', 'travel', 'plc'), ('tui', 'travel'),
+                       'tourism', 'tours', ('thomas', 'cook')],
+            'Catering': ['inn', 'restaurants', 'sous', ('sous', 'chef'), ('chef', 'de'), 'whitbread', 'drinks',
+                         'compass', ('hilton', 'worldwide'), 'cafe', 'partie', ('restaurant', 'manager')],
+            'Insurance': ['brokers', ('insurance', 'brokers'), ('insurance', 'services'), 'willis', 'rsa',
+                          ('insurance', 'group'), 'marsh', ('insurance', 'company'), ('account', 'handler'),
+                          ('direct', 'line'), 'towergate', 'allianz'],
+            'HR': ['recruiter', ('hr', 'business'), ('hr', 'business', 'partner'), ('recruitment', 'ltd'),
+                   ('hr', 'advisor'), ('senior', 'recruitment'), ('hr', 'consultant'),
+                   ('senior', 'recruitment', 'consultant'), 'resourcer', ('recruitment', 'manager'), ('senior', 'hr')],
+            'IT': [('senior', 'software'), 'fujitsu', ('technical', 'consultant'), ('senior', 'developer'),
+                   ('it', 'consultant'), 'packard', 'hewlett', ('hewlett', 'packard'),
+                   ('senior', 'software', 'engineer')],
+            'Engineering': [('architectural', 'assistant'), ('civil', 'engineer'), 'amey',
+                            ('architectural', 'technician'), 'jacobs', ('graduate', 'engineer'),
+                            ('project', 'architect'), ('architects', 'ltd'), 'nuttall', ('consulting', 'engineers'),
+                            ('architectural', 'technologist'), 'halcrow', ('bam', 'nuttall'), 'geotechnical'],
+            'Social Services': ['funeral', ('family', 'support'), ('social', 'work'), 'nanny', 'childminder',
+                                'fostering', 'play', 'ecoclean', ('funeral', 'directors'), 'haringey', 'safeguarding',
+                                ('foster', 'carer'), 'domestic', 'baby'],
+            'Finance': [('financial', 'adviser'), ('independent', 'financial'), ('independent', 'financial', 'adviser'),
+                        'loans', 'place', 'ifa', ('financial', 'planner'), ('place', 'wealth'),
+                        ('place', 'wealth', 'management')],
+            'Security': [('fire', 'security'), ('security', 'ltd'), ('security', 'consultant'), ('close', 'protection'),
+                         ('security', 'systems'), ('security', 'manager'), 'adt', ('security', 'group'),
+                         ('g4s', 'security'), 'secure', ('g4s', 'security', 'services')],
+            'Logistics': ['dhl', ('royal', 'mail'), ('transport', 'for'), ('transport', 'for', 'london'), 'savills',
+                          ('sales', 'negotiator'), 'freight', ('property', 'manager'), 'trains', 'cbre',
+                          'transportation'],
+            'Utilities': ['swindon', 'lowri', ('lowri', 'beck'), 'beck', ('beck', 'systems'),
+                          ('lowri', 'beck', 'systems'), ('a', 'o'), ('swindon', 'borough'),
+                          ('swindon', 'borough', 'council'), 'pcubed', 'db2', ('oracle', 'dba'),
+                          ('beck', 'systems', 'ltd')],
+            'Marketing': [('senior', 'marketing'), 'mccann', ('digital', 'marketing', 'manager'),
+                          ('marketing', 'coordinator'), ('digital', 'marketing', 'executive'), ('digital', 'account'),
+                          ('media', 'marketing')],
+            'Accounting': ['accountants', ('chartered', 'accountants'), ('accounts', 'assistant'), 'grant', 'thornton',
+                           ('grant', 'thornton'), ('tax', 'manager'), ('financial', 'accountant'), 'bdo',
+                           ('chartered', 'accountant'), ('baker', 'tilly'), 'tilly', ('audit', 'senior')],
+            'Legal': [('trainee', 'solicitor'), 'paralegal', 'chambers', 'lawyer', ('solicitors', 'llp'), 'barrister',
+                      'litigation', ('legal', 'assistant'), 'attorney', 'dickinson', 'allen', 'eversheds',
+                      ('associate', 'solicitor'), 'linklaters', ('legal', 'executive')],
+            'Manufacturing': ['rover', 'jaguar', ('land', 'rover'), ('jaguar', 'land', 'rover'), ('jaguar', 'land'),
+                              'automotive', 'motors', ('motor', 'company'), 'bmw', ('ford', 'motor'),
+                              ('ford', 'motor', 'company'), 'mercedes', 'benz', ('mercedes', 'benz'), 'electric',
+                              ('motors', 'ltd'), ('motor', 'group')],
+            'Military': ['aircraft', 'selex', 'qinetiq', 'squadron', 'pilot', 'hms', 'commanding', ('selex', 'es'),
+                         'es', ('marine', 'engineer'), 'lockheed', ('lockheed', 'martin'), 'joint', 'capability',
+                         ('united', 'states'), 'states', 'hq', ('engineer', 'officer'), ('equipment', 'support'),
+                         ('defence', 'equipment')],
+            'Education': ['headteacher', 'curriculum', ('head', 'teacher'), 'grammar', 'catholic', 'form',
+                          ('grammar', 'school'), ('education', 'consultant'), 'early', 'sixth', ('sixth', 'form'),
+                          ('community', 'college'), ('school', 'for')],
+            'Sales': ['sterling', ('solutions', 'limited'), 'assistance', ('sales', 'support'), ('uk', 'plc'),
+                      ('call', 'centre'), ('manager', 'uk'), 'robins', ('director', 'uk'), 'sme', 'call',
+                      ('europe', 'limited')],
+            'Scientific': ['pharmaceuticals', 'astrazeneca', 'pharma', 'pfizer', ('imperial', 'college', 'london'),
+                           'gsk', 'chemist', ('research', 'scientist'), 'pharmaceutical', 'chemical',
+                           ('post', 'doctoral'), 'chemicals', 'chemistry'],
+            'Design': [('freelance', 'graphic'), ('freelance', 'graphic', 'designer'), ('graphic', 'design'),
+                       ('senior', 'designer'), ('freelance', 'designer'), ('digital', 'designer'), ('design', 'intern'),
+                       'designs', ('junior', 'designer'), 'illustration', ('design', 'consultant')],
+            'Media': ['books', ('producer', 'director'), ('assistant', 'producer'), ('broadcast', 'journalist'),
+                      'series', ('editorial', 'assistant')],
+            'Health': ['doctor', ('hospitals', 'nhs', 'foundation'), ('healthcare', 'nhs'),
+                       ('hospital', 'nhs', 'foundation'), ('university', 'hospitals'), ('healthcare', 'nhs', 'trust'),
+                       'gp', ('ambulance', 'service'), ('health', 'nhs'), ('teaching', 'hospitals')],
+            'Policy': ['commons', ('house', 'commons'), 'parliamentary', 'political', 'parliament', 'liberal', 'labour',
+                       'economist', 'conservative', 'democrats', ('liberal', 'democrats'), 'kirklees',
+                       ('kirklees', 'council'), ('senior', 'policy'), ('policy', 'officer'), 'embassy', 'nations',
+                       ('labour', 'party'), ('policy', 'adviser'), ('parliamentary', 'assistant')],
+            'Construction': [('construction', 'manager'), 'laing', ('senior', 'quantity'),
+                             ('senior', 'quantity', 'surveyor'), "o'rourke", ('laing', "o'rourke"), 'isg', 'mace',
+                             'joinery', 'dixon', 'sindall', ('morgan', 'sindall'), ('willmott', 'dixon'), 'willmott',
+                             'skanska', 'roofing', ('kier', 'group'), 'joiner', 'foreman'],
+            'Art and Entertainment': ['musician', 'singer', 'stage', 'composer', ('freelance', 'photographer'), 'opera',
+                                      'dj', 'actress', 'songwriter', 'artistic', ('sound', 'engineer'),
+                                      ('stage', 'manager'), 'guitar', 'dancer', 'performer', 'musical',
+                                      ('theatre', 'company')],
+            'Animal Care': [('veterinary', 'nurse'), 'veterinarian', 'pdsa', ('veterinary', 'practice'),
+                            ('animal', 'health'), ('laboratories', 'agency'), ('veterinary', 'laboratories'),
+                            ('veterinary', 'laboratories', 'agency'), ('veterinary', 'clinic'),
+                            ('health', 'veterinary', 'laboratories')],
+            'PR': [('press', 'officer'), ('pr', 'manager'), ('internal', 'communications'),
+                   ('corporate', 'communications'), ('pr', 'marketing'), ('pr', 'consultant'), ('media', 'relations'),
+                   ('pr', 'account'), ('pr', 'intern'), ('junior', 'account'), ('pr', 'assistant'), 'publicity',
+                   ('pr', 'communications')],
+            'Policy': [('leeds', 'city', 'council'), ('work', 'pensions', 'dwp'), ('pensions', 'dwp'),
+                       ('royal', 'borough'), ('kent', 'county'), ('kent', 'county', 'council'), 'oxfordshire',
+                       ('hertfordshire', 'county'), ('hertfordshire', 'county', 'council'), ('oxfordshire', 'county'),
+                       ('oxfordshire', 'county', 'council'), ('essex', 'county', 'council'), ('essex', 'county'),
+                       ('hampshire', 'county')],
+            'Agriculture': ['agricultural', 'farmer', 'farming', 'farmers', 'ahdb', 'gardener',
+                            ('agriculture', 'horticulture', 'development'), ('agriculture', 'horticulture'),
+                            ('horticulture', 'development', 'board'), ('horticulture', 'development'),
+                            ('development', 'board')],
+            'Retail': [('operative', 'group'), ('co', 'operative', 'group'), 'supermarkets', 'merchandising', 'q',
+                       'buying', ('b', 'q'), 'sainsburys', 'wm', ('boots', 'uk'), ('supermarkets', 'plc'),
+                       ('wm', 'morrison'), 'dixons', ('morrison', 'supermarkets'), ('morrison', 'supermarkets', 'plc'),
+                       ('wm', 'morrison', 'supermarkets'), ('assistant', 'buyer'), 'topshop', 'look', ('new', 'look')],
+            'Higher Education': ['hallam', ('sheffield', 'hallam'), ('sheffield', 'hallam', 'university'),
+                                 ('hallam', 'university'), ('e', 'learning'), 'salford', ('university', 'aberdeen'),
+                                 ('university', 'salford'), 'reader', ('cardiff', 'university'), 'swansea'],
+            'Consulting': [('consulting', 'group'), 'growth', ('associate', 'consultant'), ('programme', 'director'),
+                           ('consulting', 'limited'), ('pa', 'consulting'), ('consultancy', 'ltd'),
+                           ('pa', 'consulting', 'group'), ('change', 'manager'), ('management', 'consulting')]}
+        for key in c_legend:
+            index = guess_topic(ilda, c_legend[key], indtf_features, irrelevant, verbose=False)
+            legend[index] = key
+        return legend
 
 def coherence_check(n, transformed, labels, position = None, unique = True):
-    """Prints and returns the (unique if set to True) features inferred from the top n features for each topic given the transformed observations, and labels."""
+    """Prints and returns the (unique if set to True) features inferred from the top n features for each topic
+    given the transformed observations, and labels.
+    If position is entered then unique is ignored.
+    :param n: The n number of top features in a topic.
+    :param transformed:
+    :param labels:
+    :param position: index position topic number
+    :param unique: should topic only contain features unique to this topic?
+    """
     topics_predicted = list(zip(labels,transformed))
     all_top_features = []
     updated_topfeatures = []
@@ -206,7 +389,10 @@ def coherence_check(n, transformed, labels, position = None, unique = True):
 
 def set_weight(term, irrelevant):
     """Sets weight of each term depending on ocurrance. 0.2 is decided completely heuristically.
-    Features are deemed irrelevant if they appear many times in each industry and aren't associated with one in particular."""
+    Features are deemed irrelevant if they appear many times in each industry and
+    aren't associated with one in particular.
+    :param term:
+    :param irrelevant: """
     if term in irrelevant:
         return (0.2 * max([x/sum(indtf_features[term]) for x in indtf_features[term]]))
     elif isinstance(term, tuple):
@@ -217,7 +403,7 @@ def set_weight(term, irrelevant):
 def guess_topic(lda, query, features_vec, irrelevant, verbose=True):
     """Transforms a short 'document' according to a trained model and weights to infer the topic. Each topic is and index.
     Query can be a string, tuple of string or a list of tuple of strings. Verbose = False will return only the numeric index.
-    Otherwise the topics can be interpreted bu a legend in form of a dictionary."""
+    Otherwise the topics can be interpreted by a legend in form of a dictionary."""
     query_doc = []
     doc_topic = []
     topic_most_pr = None
@@ -305,7 +491,7 @@ def try_normaliser(query_role):
     c.close()
     body = memoryview.getvalue()
     str_body = body.decode('utf-8')
-    results = xmltodict.parse(str_body)
+    results = xmltodict.parse(str_body)  # TODO needs to be rewritten with different library
     try:
         return results['NormalisationResult']['NormalisationJDs']['JD']['Discipline']['@discipline']
     except:
@@ -376,8 +562,9 @@ def c_legend(collapse,lda,features_vec, irrelevant):
 
 if __name__ == "__main__":
     # Usage: first command line argument is the directory with the csv files under the cwd, second is keywords 'test'/'train'.
-    dirname = sys.argv[1]
-    train_test = sys.argv[2]
+    dirname = sys.argv[1]  # where is the data
+    legend = {}
+    train_test = sys.argv[2]  # if a model is already trained already then use 'test' otherwise use 'train'
     if train_test == 'train':
         for filename in os.listdir(dirname):
             if filename.startswith('.') == False:
@@ -397,6 +584,9 @@ if __name__ == "__main__":
         ilda = pickle.load(open("ilda.data", "rb"))
         irrelevant = irrelevant_features(indtf_features)
         transformed = ilda.transform(indtf_samples)
+
+        # to get sample output:
+        print(guess_topic(lda=ilda, query="project manager", features_vec=indtf_features, irrelevant=irrelevant, verbose=True))
     else:
         print('Usage: location of directory, ')
 #features_vector = pickle.load(open("features_vector.data", "rb"))
